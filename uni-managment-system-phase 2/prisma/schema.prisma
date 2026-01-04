@@ -1,0 +1,588 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+enum UserRole {
+  PARENT
+  STUDENT
+  PROFESSOR
+  TEACHING_ASSISTANT
+  UNIT_HEAD
+  STUDENT_AFFAIRS_OFFICER
+  DEAN
+  DIRECTOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  PENDING
+  DISABLED
+}
+
+model User {
+  id          String     @id
+  userCode    String     @unique
+  email       String
+  role        UserRole
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  roomRequests RoomRequest[]
+  bookings     Booking[]
+  student      Student?
+  staff        Staff?
+  taughtCourses Course[] @relation("CourseInstructor")  
+  assistedCourses Course[] @relation("CourseTeachingAssistant")
+  createdAssignments Assignment[] // Assignments created by this user
+  createdQuizzes Quiz[] // Quizzes created by this user
+  createdExams   Exam[] // Exams created by this user
+  gradedGrades Grade[] // Grades graded by this user
+  approvedLeaveRequests LeaveRequest[] // Leave requests approved by dean/director
+  sentMessages      Message[] @relation("MessageSender")
+  receivedMessages  Message[] @relation("MessageReceiver")
+  announcements     Announcement[]
+
+  @@index([userCode])
+  @@index([email])
+}
+
+enum RoomType {
+  LECTURE_HALL
+  LABORATORY
+  SEMINAR_ROOM
+  OFFICE
+  MEETING_ROOM
+  AUDITORIUM
+}
+
+enum RoomStatus {
+  AVAILABLE
+  MAINTENANCE
+}
+
+enum RoomRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum BookingStatus {
+  ACTIVE
+  CANCELLED
+}
+
+model Room {
+  id          String     @id @default(uuid())
+  name        String
+  type        RoomType
+  location    String
+  capacity    Int?
+  status      RoomStatus @default(AVAILABLE)
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  roomRequests RoomRequest[]
+  bookings     Booking[]
+  // EAV relation - custom room properties stored as EntityAttributeValue with entityType=ROOM
+
+  @@index([status])
+  @@index([type])
+  @@index([name])
+}
+
+model RoomRequest {
+  id          String            @id @default(uuid())
+  roomId      String
+  requesterId String
+  date        DateTime
+  startTime   DateTime
+  endTime     DateTime
+  status      RoomRequestStatus @default(PENDING)
+  reason      String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relations
+  room     Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  requester User @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([requesterId])
+  @@index([status])
+  @@index([date])
+  @@index([roomId, date, startTime, endTime])
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  roomId      String
+  userId      String
+  date        DateTime
+  startTime   DateTime
+  endTime     DateTime
+  status      BookingStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@index([userId])
+  @@index([status])
+  @@index([date])
+  @@index([roomId, date, startTime, endTime])
+  @@unique([roomId, date, startTime, endTime])
+}
+
+enum AdmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Admission {
+  id          String          @id @default(uuid())
+  userId      String
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime
+  phoneNumber String?
+  address     String?
+  // documents removed - now stored in EAV (EntityAttributeValue)
+  status      AdmissionStatus @default(PENDING)
+  notes       String?
+  reviewedBy  String? // User ID of reviewer
+  reviewedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relations
+  applicant User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // EAV relation - documents stored as EntityAttributeValue with entityType=ADMISSION
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Student {
+  id            String     @id @default(uuid())
+  firstName      String
+  lastName       String
+  dateOfBirth    DateTime
+  phoneNumber    String?
+  address        String?
+  enrollmentDate DateTime
+  graduationDate DateTime?
+  gpa            Float?     @default(0.0)
+  status         String     @default("ACTIVE") // ACTIVE, GRADUATED, SUSPENDED, WITHDRAWN
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Relations
+  user       User @relation(fields: [id], references: [id], onDelete: Cascade)
+  transcripts Transcript[]
+  enrollments Enrollment[]
+  grades      Grade[]
+  submissions Submission[]
+  // EAV relation - custom student attributes stored as EntityAttributeValue with entityType=STUDENT
+
+  @@index([status])
+  @@index([firstName, lastName])
+}
+
+model Transcript {
+  id          String   @id @default(uuid())
+  studentId   String
+  gpa         Float
+  // courses removed - now stored in EAV (EntityAttributeValue)
+  pdfPath     String?  // Path to stored PDF file
+  generatedAt DateTime @default(now())
+  generatedBy String?  // User ID of generator
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  // EAV relation - courses stored as EntityAttributeValue with entityType=TRANSCRIPT
+
+  @@index([studentId])
+  @@index([generatedAt])
+}
+
+enum CourseStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+model Course {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  name        String
+  description String?
+  creditHours Int
+  status      CourseStatus @default(ACTIVE)
+  instructorId String      // User ID of professor/TA
+  teachingAssistantId String?
+  // materials removed - now stored in EAV (EntityAttributeValue)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Relations
+  instructor  User         @relation("CourseInstructor", fields: [instructorId], references: [id], onDelete: Restrict)
+  teachingAssistant User?  @relation("CourseTeachingAssistant", fields: [teachingAssistantId], references: [id], onDelete: SetNull)
+  enrollments Enrollment[]
+  assignments Assignment[]
+  quizzes     Quiz[]
+  exams       Exam[]
+  announcements Announcement[]
+  // EAV relation - materials stored as EntityAttributeValue with entityType=COURSE
+
+  @@index([code])
+  @@index([status])
+  @@index([instructorId])
+  @@index([teachingAssistantId])
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  studentId String
+  courseId  String
+  enrolledAt DateTime @default(now())
+  status    String   @default("ACTIVE") // ACTIVE, DROPPED, COMPLETED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, courseId])
+  @@index([studentId])
+  @@index([courseId])
+  @@index([status])
+}
+
+enum GradeStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Assignment {
+  id          String   @id @default(uuid())
+  courseId    String
+  createdBy   String   // User ID of creator (professor/TA)
+  title       String
+  description String?
+  deadline    DateTime
+  maxScore    Float    @default(100.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  grades Grade[]
+  submissions Submission[]
+
+  @@index([courseId])
+  @@index([createdBy])
+  @@index([deadline])
+}
+
+model Quiz {
+  id          String   @id @default(uuid())
+  courseId    String
+  createdBy   String   // User ID of creator (professor/TA)
+  title       String
+  description String?
+  // questions removed - now stored in EAV (EntityAttributeValue)
+  timeLimit   Int?     // Time limit in minutes
+  maxScore    Float    @default(100.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  grades Grade[]
+  submissions Submission[]
+  // EAV relation - questions stored as EntityAttributeValue with entityType=QUIZ
+
+  @@index([courseId])
+  @@index([createdBy])
+}
+
+model Exam {
+  id          String   @id @default(uuid())
+  courseId    String
+  createdBy   String   // User ID of creator (professor/TA)
+  title       String
+  description String?
+  date        DateTime
+  maxScore    Float    @default(100.0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  course  Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  creator User   @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  grades   Grade[]
+  submissions Submission[]
+
+  @@index([courseId])
+  @@index([createdBy])
+  @@index([date])
+}
+
+enum SubmissionType {
+  ASSIGNMENT
+  QUIZ
+  EXAM
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  GRADED
+}
+
+model Submission {
+  id           String           @id @default(uuid())
+  studentId    String
+  type         SubmissionType
+  assignmentId String?
+  quizId       String?
+  examId       String?
+  content      String?
+  fileUrl      String?
+  fileName     String?
+  fileType     String?
+  fileSize     Int?
+  status       SubmissionStatus @default(SUBMITTED)
+  submittedAt  DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  // Relations
+  student    Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignment Assignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  quiz       Quiz?       @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  exam       Exam?       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  grade      Grade?
+
+  @@index([studentId])
+  @@index([type])
+  @@index([assignmentId])
+  @@index([quizId])
+  @@index([examId])
+  @@index([status])
+  @@index([submittedAt])
+}
+
+model Grade {
+  id            String      @id @default(uuid())
+  studentId     String
+  assignmentId String?
+  quizId        String?
+  examId        String?
+  submissionId  String?     @unique
+  score         Float
+  maxScore      Float
+  feedback      String?
+  status        GradeStatus @default(DRAFT)
+  gradedBy      String?     // User ID of grader
+  gradedAt      DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  // Relations
+  student   Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  assignment Assignment? @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  quiz      Quiz?      @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  exam      Exam?      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  submission Submission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+  grader    User?      @relation(fields: [gradedBy], references: [id], onDelete: SetNull)
+
+  @@index([studentId])
+  @@index([assignmentId])
+  @@index([quizId])
+  @@index([examId])
+  @@index([gradedBy])
+  @@index([status])
+}
+
+model Staff {
+  id            String     @id @default(uuid())
+  firstName      String
+  lastName       String
+  phoneNumber    String?
+  address        String?
+  department     String?
+  position       String?
+  hireDate       DateTime
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Relations
+  user          User         @relation(fields: [id], references: [id], onDelete: Cascade)
+  leaveRequests LeaveRequest[]
+  // EAV relation - custom staff attributes stored as EntityAttributeValue with entityType=STAFF
+ 
+  @@index([department])
+  @@index([firstName, lastName])
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model LeaveRequest {
+  id              String            @id @default(uuid())
+  staffId         String
+  startDate       DateTime
+  endDate         DateTime
+  reason          String
+  status          LeaveRequestStatus @default(PENDING)
+  approvedBy      String?            // User ID of approver (dean/director)
+  approvedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  staff    Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  approver User? @relation(fields: [approvedBy], references: [id], onDelete: SetNull)
+
+  @@index([staffId])
+  @@index([status])
+  @@index([startDate])
+  @@index([createdAt])
+}
+
+enum AnnouncementType {
+  UNIVERSITY
+  COURSE
+  DEPARTMENT
+}
+
+// ============================================
+// EAV (Entity-Attribute-Value) Models
+// ============================================
+
+enum EntityType {
+  COURSE
+  QUIZ
+  TRANSCRIPT
+  ADMISSION
+  ROOM
+  STUDENT
+  STAFF
+  ASSIGNMENT
+  GRADE
+}
+
+enum AttributeDataType {
+  STRING
+  INTEGER
+  FLOAT
+  BOOLEAN
+  DATE
+  JSON
+  URL
+}
+
+model Attribute {
+  id          String           @id @default(uuid())
+  entityType  EntityType       // Which entity type this attribute belongs to
+  name        String           // Attribute name (e.g., "material_url", "question_text")
+  dataType    AttributeDataType
+  isRequired  Boolean          @default(false)
+  defaultValue String?
+  description String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  values      EntityAttributeValue[]
+
+  @@unique([entityType, name])
+  @@index([entityType])
+  @@index([name])
+}
+
+model EntityAttributeValue {
+  id          String   @id @default(uuid())
+  entityType  EntityType
+  entityId    String   // ID of the entity (Course.id, Quiz.id, etc.)
+  attributeId String
+  value       String   // Stored as string, converted based on attribute.dataType
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  attribute Attribute @relation(fields: [attributeId], references: [id], onDelete: Cascade)
+
+  @@unique([entityType, entityId, attributeId])
+  @@index([entityType, entityId])
+  @@index([attributeId])
+  @@index([entityType])
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  senderId    String
+  receiverId  String
+  content     String
+  read        Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  sender   User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+}
+
+model Announcement {
+  id          String           @id @default(uuid())
+  authorId    String
+  type        AnnouncementType
+  title       String
+  content     String
+  courseId    String?          // Optional: for course-specific announcements
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // Relations
+  author User  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  course Course? @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([authorId])
+  @@index([type])
+  @@index([courseId])
+  @@index([createdAt])
+}
